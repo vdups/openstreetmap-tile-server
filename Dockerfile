@@ -174,6 +174,19 @@ RUN cd ~/src \
     && git checkout 612fe3e040d8bb70d2ab3b133f3b2cfc6c940520 \
     && chmod u+x ~/src/regional/trim_osc.py
 
+#TODO : install leaflet library in order not to be CDN dependant
+USER root
+WORKDIR /home/renderer/leaflet
+RUN npm install --verbose leaflet@1.6.0
+RUN ls -lR /home/renderer/leaflet
+WORKDIR /var/www/html/leaflet
+RUN mv /home/renderer/leaflet/node_modules/leaflet/dist/leaflet.js \
+       /home/renderer/leaflet/node_modules/leaflet/dist/leaflet.css \
+       /home/renderer/leaflet/node_modules/leaflet/dist/images \
+       /home/renderer/leaflet/node_modules/leaflet/LICENSE \
+       ./
+RUN rm -rf /home/renderer/leaflet
+
 # Start running
 USER root
 COPY run.sh /

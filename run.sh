@@ -1,18 +1,20 @@
 #!/bin/bash
 
 set -x
+#set -e
 
 function createPostgresConfig() {
   cp /etc/postgresql/12/main/postgresql.custom.conf.tmpl /etc/postgresql/12/main/postgresql.custom.conf
   sudo -u postgres echo "autovacuum = $AUTOVACUUM" >> /etc/postgresql/12/main/postgresql.custom.conf
   cat /etc/postgresql/12/main/postgresql.custom.conf
+  sudo -u postgres /usr/lib/postgresql/12/bin/initdb -D /var/lib/postgresql/12/main/
 }
 
 function setPostgresPassword() {
     sudo -u postgres psql -c "ALTER USER renderer PASSWORD '${PGPASSWORD:-renderer}'"
 }
 
-if [ "$#" -ne 1 ]; then
+if [ "$#" -lt 1 ]; then
     echo "usage: <import|run>"
     echo "commands:"
     echo "    import: Set up the database and import /data.osm.pbf"
@@ -28,7 +30,7 @@ if [ "$1" = "import" ]; then
     createPostgresConfig
     service postgresql start
     sudo -u postgres createuser renderer
-    sudo -u postgres createdb -E UTF8 -O renderer gis
+    sudo -u postgres createdb -T template0 -E UTF8 -O renderer gis
     sudo -u postgres psql -d gis -c "CREATE EXTENSION postgis;"
     sudo -u postgres psql -d gis -c "CREATE EXTENSION hstore;"
     sudo -u postgres psql -d gis -c "ALTER TABLE geometry_columns OWNER TO renderer;"
@@ -36,16 +38,16 @@ if [ "$1" = "import" ]; then
     setPostgresPassword
 
     # Download Luxembourg as sample if no data is provided
-    if [ ! -f /data.osm.pbf ]; then
-        echo "WARNING: No import file at /data.osm.pbf, so importing Luxembourg as example..."
+    if [ ! -f $2/data.osm.pbf ]; then
+        echo "WARNING: No import file at $2/data.osm.pbf, so importing Luxembourg as example..."
         wget -nv http://download.geofabrik.de/europe/luxembourg-latest.osm.pbf -O /data.osm.pbf
         wget -nv http://download.geofabrik.de/europe/luxembourg.poly -O /data.poly
     fi
 
     if [ "$UPDATES" = "enabled" ]; then
         # determine and set osmosis_replication_timestamp (for consecutive updates)
-        osmium fileinfo /data.osm.pbf > /var/lib/mod_tile/data.osm.pbf.info
-        osmium fileinfo /data.osm.pbf | grep 'osmosis_replication_timestamp=' | cut -b35-44 > /var/lib/mod_tile/replication_timestamp.txt
+        osmium fileinfo $2/data.osm.pbf > /var/lib/mod_tile/data.osm.pbf.info
+        osmium fileinfo $2/data.osm.pbf | grep 'osmosis_replication_timestamp=' | cut -b35-44 > /var/lib/mod_tile/replication_timestamp.txt
         REPLICATION_TIMESTAMP=$(cat /var/lib/mod_tile/replication_timestamp.txt)
 
         # initial setup of osmosis workspace (for consecutive updates)
@@ -53,12 +55,12 @@ if [ "$1" = "import" ]; then
     fi
 
     # copy polygon file if available
-    if [ -f /data.poly ]; then
-        sudo -u renderer cp /data.poly /var/lib/mod_tile/data.poly
+    if [ -f $2/data.poly ]; then
+        sudo -u renderer cp $2/data.poly /var/lib/mod_tile/data.poly
     fi
 
     # Import data
-    sudo -u renderer osm2pgsql -d gis --create --slim -G --hstore --tag-transform-script /home/renderer/src/openstreetmap-carto/openstreetmap-carto.lua --number-processes ${THREADS:-4} ${OSM2PGSQL_EXTRA_ARGS} -S /home/renderer/src/openstreetmap-carto/openstreetmap-carto.style /data.osm.pbf
+    sudo -u renderer osm2pgsql -d gis --create --slim -G --hstore --tag-transform-script /home/renderer/src/openstreetmap-carto/openstreetmap-carto.lua --number-processes ${THREADS:-4} ${OSM2PGSQL_EXTRA_ARGS} -S /home/renderer/src/openstreetmap-carto/openstreetmap-carto.style $2/data.osm.pbf
 
     # Create indexes
     sudo -u postgres psql -d gis -f indexes.sql
